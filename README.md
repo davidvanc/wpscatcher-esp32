@@ -154,6 +154,59 @@ flashpoging faalde met `No serial data received` terwijl COM5 er nog gewoon
 was. De FTDI-chip hangt aan USB-stroom en blijft dus zichtbaar, de ESP32 was
 echt uit. Staat het toestel zo, druk dan de aan/uitknop in voor je flasht.
 
+## Logboek
+
+Elke geslaagde WPS wordt weggeschreven naar flash, met datum en uur uit de
+BM8563-RTC. Uitlezen gaat via de seriële poort (115200), met deze commando's:
+
+| | |
+|---|---|
+| `dump` | de hele lijst tonen, als CSV |
+| `wis` | het logboek wissen |
+| `tijd` | tonen wat de RTC nu denkt |
+| `tijd 2026-08-28 19:35:56` | de RTC gelijkzetten |
+
+Het formaat is CSV met aanhalingstekens, dus een ssid of wachtwoord met
+komma's of aanhalingstekens erin breekt het bestand niet:
+
+```
+datum,tijd,ssid,wachtwoord
+"2026-08-28","19:35:56","MijnNetwerk","w4chtw00rd"
+```
+
+**De tijd moet je één keer zetten.** Het toestel gaat nooit online, dus er is
+geen NTP. De RTC loopt daarna door op de batterij; raakt die helemaal leeg,
+dan komt er `onbekend` in de kolommen datum en tijd te staan in plaats van
+een verzonnen datum.
+
+### Capaciteit en gedrag bij een vol bestandssysteem
+
+De partitie is 1.441.792 bytes, waarvan 1.433.600 bruikbaar. Een regel kost
+30 bytes opmaak plus ssid plus wachtwoord:
+
+| | regel | aantal regels |
+|---|---|---|
+| ssid 15, wachtwoord 45 | ~90 bytes | ~15.800 |
+| ssid 32, wachtwoord 63 (maximum) | 125 bytes | ~11.400 |
+
+Loopt het toch vol, dan **blijft het toestel gewoon werken**: onder
+`LOG_MIN_FREE_BYTES` (8 KB) wordt de regel overgeslagen met een melding op de
+seriële poort, en de QR verschijnt zoals altijd. Het logboek is bijzaak.
+
+Het opstarten wordt er niet trager van: 635 ms zonder logboek, 665 ms met.
+Bij de start wordt bewust alleen de bestandsgrootte uit de metadata gelezen
+en worden de regels **niet** geteld — dat laatste leest het hele bestand en
+zou de start dus trager maken naarmate het logboek groeit. Tellen gebeurt
+enkel bij `dump`.
+
+### Waarschuwing
+
+Dit bewaart wachtwoorden van klanten in klare tekst in flash, en dat
+overleeft het uitschakelen. Raak je het toestel kwijt, dan heeft de vinder
+elk netwerk waar je geweest bent. Dat is een bewuste afweging en het staat
+haaks op wat de Pi-versie doet, die het scherm juist wist om die reden. Zet
+`LOG_ENABLED` op `false` in `config.h` als je dat niet wil.
+
 ## Bij het flashen: let op welke FTDI
 
 De PLUS SE gebruikt een **FTDI**-chip (VID_0403, PID_6001) — niet de CH9102

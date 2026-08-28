@@ -23,6 +23,20 @@ constexpr uint32_t SHUTDOWN_AFTER_MS = 30UL * 1000UL;  // 30 seconden
 // hardware, net als give_up_after in het Pi-project.
 constexpr uint8_t GIVE_UP_AFTER_ATTEMPTS = 0;
 
+// Logboek: elke geslaagde WPS wegschrijven naar flash, met datum en uur uit
+// de BM8563-RTC. Uitlezen gaat via de seriele poort met het commando `dump`.
+//
+// LET OP: dit bewaart wachtwoorden van klanten in klare tekst in flash, en
+// dat overleeft het uitschakelen. Raak je het toestel kwijt, dan heeft de
+// vinder elk netwerk waar je geweest bent. Zet op false om dat niet te doen.
+constexpr bool LOG_ENABLED = true;
+constexpr const char *LOG_PATH = "/wpslog.csv";
+
+// Onder deze vrije ruimte wordt er niets meer bijgeschreven. Marge, zodat
+// een volgelopen bestandssysteem het toestel niet in de problemen brengt --
+// de QR blijft dan gewoon werken, enkel de logregel valt weg.
+constexpr size_t LOG_MIN_FREE_BYTES = 8192;
+
 // Hoogste QR-versie die we toestaan. De code kiest zelf de KLEINSTE versie
 // die de payload aankan (kleiner = dikkere modules = beter scanbaar); dit is
 // enkel het plafond. Versie 10 = 57x57 modules, 271 bytes op ECC_LOW, ruim

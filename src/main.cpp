@@ -5,6 +5,8 @@
 
 #include <M5Unified.h>
 #include <WiFi.h>
+#include <LittleFS.h>
+#include <time.h>
 #include "esp_wps.h"
 #include "esp_wifi.h"
 #include "qrcode.h"
@@ -116,6 +118,173 @@ static void onWifiEvent(WiFiEvent_t event, arduino_event_info_t info) {
 
     default:
       break;
+  }
+}
+
+// ------------------------------------------------------------ logboek ----
+
+static bool fsReady = false;
+
+// De RTC loopt door op de batterij, maar staat na een volledige ontlading
+// weer op zijn beginwaarde. Dan liever "onbekend" wegschrijven dan een
+// verzonnen datum.
+static bool rtcLooksSet() {
+  auto dt = M5.Rtc.getDateTime();
+  return dt.date.year >= 2026;
+}
+
+// CSV met dubbele aanhalingstekens: ssid en wachtwoord mogen komma's,
+// puntkomma's en aanhalingstekens bevatten zonder het bestand te breken.
+static String csvField(const String &in) {
+  String out = "\"";
+  for (size_t i = 0; i < in.length(); i++) {
+    char c = in[i];
+    if (c == '\r' || c == '\n') { out += ' '; continue; }
+    if (c == '"') out += '"';  // verdubbelen, zo wil CSV het
+    out += c;
+  }
+  out += "\"";
+  return out;
+}
+
+static void logAppend(const String &ssid, const String &password) {
+  if (!LOG_ENABLED) return;
+  if (!fsReady) {
+    Serial.println("logboek: geen bestandssysteem, regel niet bewaard");
+    return;
+  }
+
+  char datum[16] = "onbekend";
+  char tijd[16] = "onbekend";
+  if (rtcLooksSet()) {
+    auto dt = M5.Rtc.getDateTime();
+    snprintf(datum, sizeof(datum), "%04d-%02d-%02d",
+             (int)dt.date.year, (int)dt.date.month, (int)dt.date.date);
+    snprintf(tijd, sizeof(tijd), "%02d:%02d:%02d",
+             (int)dt.time.hours, (int)dt.time.minutes, (int)dt.time.seconds);
+  } else {
+    Serial.println("logboek: RTC niet gezet -- tijd wordt 'onbekend'. "
+                   "Zet ze met: tijd JJJJ-MM-DD UU:MM:SS");
+  }
+
+  // Vooraf kijken of er nog plaats is. Een vol bestandssysteem mag het
+  // toestel niet breken: de QR is de hoofdzaak, het logboek is bijzaak, dus
+  // bij plaatsgebrek slaan we de regel over en gaat de rest gewoon door.
+  size_t vrij = LittleFS.totalBytes() - LittleFS.usedBytes();
+  if (vrij < LOG_MIN_FREE_BYTES) {
+    Serial.printf("logboek VOL: nog %u bytes vrij, regel NIET bewaard. "
+                  "Maak plaats met het commando 'wis'.\n", (unsigned)vrij);
+    return;
+  }
+
+  File f = LittleFS.open(LOG_PATH, FILE_APPEND);
+  if (!f) {
+    Serial.println("logboek: kon het bestand niet openen");
+    return;
+  }
+  String regel = csvField(datum) + "," + csvField(tijd) + "," +
+                 csvField(ssid) + "," + csvField(password) + "\n";
+  size_t geschreven = f.print(regel);
+  f.close();
+
+  if (geschreven != regel.length()) {
+    Serial.printf("logboek: slechts %u van %u bytes weggeschreven -- "
+                  "waarschijnlijk vol\n",
+                  (unsigned)geschreven, (unsigned)regel.length());
+  } else {
+    Serial.printf("logboek: bijgeschreven (%s %s)\n", datum, tijd);
+  }
+}
+
+// Gebufferd tellen, niet byte per byte: dit draait bij elke start, en
+// f.read() per byte kost bij een gegroeid logboek merkbaar tijd.
+static uint32_t logCountEntries() {
+  if (!fsReady || !LittleFS.exists(LOG_PATH)) return 0;
+  File f = LittleFS.open(LOG_PATH, FILE_READ);
+  if (!f) return 0;
+  uint32_t n = 0;
+  uint8_t buf[512];
+  while (f.available()) {
+    size_t got = f.read(buf, sizeof(buf));
+    for (size_t i = 0; i < got; i++) { if (buf[i] == '\n') n++; }
+  }
+  f.close();
+  return n;
+}
+
+static void logDump() {
+  Serial.println("=== logboek ===");
+  if (!fsReady) { Serial.println("(geen bestandssysteem)"); return; }
+  if (!LittleFS.exists(LOG_PATH)) {
+    Serial.println("(nog leeg)");
+    Serial.println("=== einde ===");
+    return;
+  }
+  File f = LittleFS.open(LOG_PATH, FILE_READ);
+  if (!f) { Serial.println("(kon niet openen)"); return; }
+  Serial.println("datum,tijd,ssid,wachtwoord");
+  uint8_t buf[256];
+  while (f.available()) {
+    size_t got = f.read(buf, sizeof(buf));
+    Serial.write(buf, got);
+  }
+  f.close();
+  Serial.printf("=== einde, %u regels ===\n", (unsigned)logCountEntries());
+}
+
+static void logWipe() {
+  if (fsReady && LittleFS.exists(LOG_PATH)) {
+    LittleFS.remove(LOG_PATH);
+    Serial.println("logboek gewist");
+  } else {
+    Serial.println("logboek was al leeg");
+  }
+}
+
+// --------------------------------------------------- seriele commando's ----
+
+static void runCommand(const String &cmd) {
+  if (cmd == "dump") {
+    logDump();
+  } else if (cmd == "wis") {
+    logWipe();
+  } else if (cmd.startsWith("tijd ")) {
+    int y, mo, d, h, mi, s;
+    if (sscanf(cmd.c_str(), "tijd %d-%d-%d %d:%d:%d", &y, &mo, &d, &h, &mi, &s) == 6) {
+      struct tm t = {};
+      t.tm_year = y - 1900;
+      t.tm_mon = mo - 1;
+      t.tm_mday = d;
+      t.tm_hour = h;
+      t.tm_min = mi;
+      t.tm_sec = s;
+      t.tm_isdst = -1;
+      mktime(&t);  // vult tm_wday in, want de BM8563 bewaart de weekdag apart
+      M5.Rtc.setDateTime(&t);
+      Serial.printf("tijd gezet op %04d-%02d-%02d %02d:%02d:%02d\n", y, mo, d, h, mi, s);
+    } else {
+      Serial.println("gebruik: tijd JJJJ-MM-DD UU:MM:SS");
+    }
+  } else if (cmd == "tijd") {
+    auto dt = M5.Rtc.getDateTime();
+    Serial.printf("RTC staat op %04d-%02d-%02d %02d:%02d:%02d%s\n",
+                  (int)dt.date.year, (int)dt.date.month, (int)dt.date.date,
+                  (int)dt.time.hours, (int)dt.time.minutes, (int)dt.time.seconds,
+                  rtcLooksSet() ? "" : "  (lijkt niet gezet)");
+  } else {
+    Serial.println("commando's: dump | wis | tijd | tijd JJJJ-MM-DD UU:MM:SS");
+  }
+}
+
+static void handleSerial() {
+  static String buf;
+  while (Serial.available()) {
+    char c = Serial.read();
+    if (c == '\n' || c == '\r') {
+      if (buf.length()) { runCommand(buf); buf = ""; }
+    } else if (buf.length() < 64) {
+      buf += c;
+    }
   }
 }
 
@@ -373,6 +542,40 @@ void setup() {
   Serial.printf("wpscatcher-esp32 -- scherm %dx%d\n",
                 M5.Display.width(), M5.Display.height());
 
+  if (LOG_ENABLED) {
+    // true = formatteren als het bestandssysteem nog niet bestaat. Dat
+    // gebeurt eenmalig bij de allereerste start en duurt een paar seconden;
+    // daarna is het mounten een kwestie van milliseconden.
+    fsReady = LittleFS.begin(true);
+    if (fsReady) {
+      // Het bestand meteen aanmaken als het er nog niet is. Anders logt de
+      // VFS-laag bij elke start een rode "does not exist"-regel zodra we
+      // ernaar kijken, en dat leest als een fout terwijl er niets mis is.
+      if (!LittleFS.exists(LOG_PATH)) {
+        File nieuw = LittleFS.open(LOG_PATH, FILE_APPEND);
+        if (nieuw) nieuw.close();
+      }
+      // Bewust GEEN regels tellen bij het opstarten: dat leest het hele
+      // bestand en zou de start dus trager maken naarmate het logboek groeit.
+      // De grootte staat in de metadata en is meteen op te vragen. Tellen
+      // gebeurt enkel bij 'dump', waar je toch al op uitvoer wacht.
+      size_t vrij = LittleFS.totalBytes() - LittleFS.usedBytes();
+      File f = LittleFS.open(LOG_PATH, FILE_READ);
+      size_t gebruikt = f ? f.size() : 0;
+      if (f) f.close();
+      Serial.printf("logboek: %u bytes, %u van %u vrij -- "
+                    "typ 'dump' om te tonen\n",
+                    (unsigned)gebruikt, (unsigned)vrij,
+                    (unsigned)LittleFS.totalBytes());
+      if (!rtcLooksSet()) {
+        Serial.println("logboek: RTC nog niet gezet. "
+                       "Doe dat met: tijd JJJJ-MM-DD UU:MM:SS");
+      }
+    } else {
+      Serial.println("logboek: bestandssysteem niet beschikbaar");
+    }
+  }
+
   wpsConfigInit();
   WiFi.mode(WIFI_MODE_STA);
   WiFi.onEvent(onWifiEvent);
@@ -383,12 +586,14 @@ void setup() {
 
 void loop() {
   M5.update();
+  handleSerial();
 
   // Vlaggen uit de event-task afhandelen, in deze task, waar de Strings
   // en het scherm veilig aangeraakt mogen worden.
   if (wpsSuccessFlag && state != State::WpsSuccess) {
     wpsSuccessFlag = false;
     readWpsCredentials();
+    logAppend(foundSsid, foundPassword);
     state = State::WpsSuccess;
     qrShownAtMs = millis();
   }
