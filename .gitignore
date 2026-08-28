@@ -1,0 +1,3 @@
+# PlatformIO: toolchain, libraries en build-uitvoer, allemaal opnieuw te maken
+# met `pio run`. Staat hier honderden MB's aan gedownloade pakketten in.
+.pio/
