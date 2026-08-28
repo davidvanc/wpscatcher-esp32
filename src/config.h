@@ -13,7 +13,9 @@ constexpr bool SHOW_PASSWORD = true;
 
 // Scherm blijft aan tot dit verstreken is nadat de QR getoond werd (ms).
 // 0 = nooit vanzelf uitschakelen (dan enkel via een knop).
-constexpr uint32_t SHUTDOWN_AFTER_MS = 15UL * 1000UL;  // 15 seconden
+// 30 s, niet korter: een telefooncamera moet eerst scherpstellen op het
+// schermpje voor ze de QR pakt, en dat kost enkele seconden.
+constexpr uint32_t SHUTDOWN_AFTER_MS = 30UL * 1000UL;  // 30 seconden
 
 // Stopt na zoveel mislukte WPS-pogingen zonder ooit verbinding (0 = nooit
 // opgeven). Op 0 blijft het toestel bij een router zonder WPS doorzoeken

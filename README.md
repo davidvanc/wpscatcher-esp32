@@ -35,19 +35,19 @@ opmaak + ssid + wachtwoord):
 | 36–60 tekens | 4 | 33 | 3 | **0,32** |
 | 61–88 tekens | 5 | 37 | 3 | 0,32 |
 
-In het Pi-project is dit op een echte telefoon geijkt: **0,58 en 0,41 mm
-lazen, 0,29 mm niet meer**, met de faalgrens rond 0,3–0,4 mm.
+In het Pi-project is dit op papier geijkt: **0,58 en 0,41 mm lazen, 0,29 mm
+niet meer**, met de faalgrens rond 0,3–0,4 mm. Op grond daarvan verwachtte ik
+dat die tweede rij — 0,32 mm — randgeval zou zijn.
 
-Dus: blijft ssid+wachtwoord samen onder ~35 tekens, dan zit je op 0,42 mm en
-dat is bewezen leesbaar. Daarboven val je terug op 0,32 mm en dat is
-**randgeval** — mogelijk goed, niet bewezen. Twee dingen die in ons voordeel
-werken: die ijking gebeurde op papier (inktspreiding, rafelige randen) en dit
-is een LCD met harde pixelgrenzen én achtergrondverlichting, dus meer
-contrast dan zowel papier als e-ink.
+**Dat viel mee: getest met een wachtwoord van 45 tekens en het scande gewoon.**
+Die zit met 0,32 mm per module onder de papieren faalgrens en werkt toch. De
+verklaring is dat de ijking op papier pessimistisch is voor dit scherm:
+inktspreiding en rafelige randen tegenover harde pixelgrenzen en
+achtergrondverlichting.
 
 De firmware logt bij elke QR de gekozen versie en de mm per module, en
-waarschuwt onder 0,40 mm. Bij de eerste test met een echte router weet je het
-dus meteen in plaats van te moeten gissen.
+waarschuwt nog steeds onder 0,40 mm — die waarschuwing is dus strenger dan
+wat in de praktijk blijkt te werken.
 
 ## Antenne
 
@@ -129,9 +129,13 @@ Vereist [PlatformIO](https://platformio.org/). `platformio.ini` haalt
 
 ## Werkend, 28-08-2026
 
-Volledige keten op hardware: opstarten → "WPS zoeken" → knop op de modem →
-QR → zichzelf uitgeschakeld. Draaiende instelling: `SHUTDOWN_AFTER_MS` op
-15 s, geen credentials als tekst op het scherm.
+Volledige keten op hardware, op twee toestellen: opstarten → "WPS zoeken" →
+knop op de modem → QR → zichzelf uitgeschakeld. Ook getest met een
+wachtwoord van 45 tekens.
+
+Draaiende instelling: `SHUTDOWN_AFTER_MS` op **30 s** — korter kan niet,
+want een telefooncamera moet eerst scherpstellen op het schermpje. Geen
+credentials als tekst op het scherm.
 
 Gemeten in plaats van geschat:
 
@@ -160,9 +164,6 @@ altijd expliciet en vertrouw niet op automatische detectie.
 
 ## Nog open
 
-- **QR-leesbaarheid bij een lange ssid + wachtwoord**: zie de tabel hierboven.
-  Bij het geteste netwerk werkte het; boven ~35 tekens zakt de module naar
-  0,32 mm en dat blijft onbeproefd.
 - **Meerdere WPS-credentials**: geeft de router er meer dan één terug, dan
   roept WPS `esp_wifi_set_config()` niet zelf aan en leest
   `readWpsCredentials()` mogelijk een lege config. Zeldzaam bij
